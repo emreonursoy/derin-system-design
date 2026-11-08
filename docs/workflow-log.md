@@ -85,3 +85,37 @@ Add one entry per phase.
 - What was wrong or shallow: most table and column names weren't in the ADRs, so they were added to ADR 0001 and marked assumed.
 - What I changed or decided: the panel's scope.
 - Subagent used and what it found: none.
+## Phase 12: Architecture review and revision plan
+- Prompt (paste or summarize): a review I developed with ChatGPT and pasted in. It treats the brief as primary, asks for each decision to be classified Required, Necessary, Assumed or Out of scope, for a clear Derin AI boundary, and for ADRs 0001-0005 to be simplified. It asks for a plan first, and no file changes until I approve.
+- What the AI produced: a revision plan with six technical errors, cross-ADR conflicts, nine decisions for me, and an ingress comparison using Microsoft Learn excerpts.
+- What was wrong or shallow: the design had gone well beyond the brief. Six errors were found by reading: a running projector could restore a withdrawn response; rollups were fixed after the row they needed was deleted; the number check couldn't remove text already streamed; a crash could leave Redis stale on a quiet collection; a backup restore could bring back withdrawn responses; some wording overclaimed ("stops" subtraction, deletion "at link expiry").
+- What I changed or decided: Q39-Q47. I rejected its "inference only" default for Derin and its dedicated AI deployment, and made second-admin approval optional instead of its pending-policy block.
+- Subagent used and what it found: none at this stage.
+
+## Phase 13: Applying the revision
+- Prompt (paste or summarize): my nine decisions, developed with ChatGPT. Fix all six errors, stay focused on the case study, keep guarantees, align all documents, then run the independent consistency review and report unresolved issues.
+- What the AI produced: rewritten ADRs 0001-0005, design.md, assumptions, risks, requirements, diagram source and AI note.
+- What was wrong or shallow: while rewriting, it found that the phone needs coded branch flags for skip logic after answers are deleted, which the old text had missed (R24). Withdrawal codes also had to become per attempt, or a forwarded link could withdraw someone else's answers. None of the fixes is tested.
+- What I changed or decided: as Phase 12. PNG check pending my export.
+- Subagent used and what it found: design-reviewer, as a consistency review, on the source text only. The PNG was stale. It found that tombstones could be lost in a restore; that attempts weaken the minimum group (now R25, unresolved); that transcript export skipped the browsing controls; that the AI note wrongly blamed the AI for adding pinned sets, which were my requirement; that the primary had no failure design; and that the "AI-written" label for numbers needed the number detection we had rejected. Fixes were applied, and not re-reviewed.
+
+## Phase 14: Distinct participants (R25)
+- Prompt (paste or summarize): my R25 decision. The minimum group counts distinct participants through an opaque server-side group per invitation, using only the latest valid attempt, with atomic and idempotent switching. Keep the ID internal, document what it doesn't establish and the usability cost, with no identity resolution system. Then run another independent review, and flag absolute claims.
+- What the AI produced: one read row per invitation's counted attempt, so all paths count participants with no extra logic. Edge-case rules recorded as Q49, for my review.
+- What was wrong or shallow: Phase 13's "all responses run slightly high" hid a disclosure gap, which the reviewer found.
+- What I changed or decided: Q48. Q49 pending.
+- Subagent used and what it found: design-reviewer, on source text only, because the PNG is stale. It judged one read row per group sound, but found 13 design gaps in the rules around it. They include: exports missing older tombstones; a withdrawn flag nothing reads; completion not signalling the projector; chunked exports duplicating an invitation; SSE with no routing between POST and stream; and lease renewal lost when I simplified ADR 0003. It also listed absolute claims the design doesn't guarantee, and asked whether attempts are worth their complexity. Not fixed yet, pending my decision.
+
+## Phase 15: One invitation, one response
+- Prompt (paste or summarize): I reversed Q42 and Q48: one invitation maps to one logical response, the same device resumes, a new device gets no earlier answers, and cross-device recovery is a product assumption. Reassess the 13 findings, fix what remains, replace the absolute claims, and stay proportional. Run another review. No PNG export and no commit.
+- What the AI produced: Q50; POST-as-stream; lease renewal with fencing; export and replica rules; chat cleanup; a dedicated withdrawal log.
+- What was wrong or shallow: the AI had recommended separate attempts in its plan, and then defended them with more rules. It had also dropped lease renewal while simplifying. POST and a separate stream request would not have routed reliably across instances.
+- What I changed or decided: Q50, and the shift away from attempts.
+- Subagent used and what it found: design-reviewer, on source text only. The earlier findings held. It found five new critical gaps: withdrawal deleted the invite row, so the link could create a new response; the code route failed on a lost phone; withdrawal didn't reach the AI service; chat cleanup missed repeated quotes; and binding wasn't checked on saves. All are fixed in the text, with no further review by that point. It also listed optional hardening and over-specified sections, left for my decision.
+
+## Phase 16: Final verification and freeze
+- Prompt (paste or summarize): stop the review cycle. Verify only the five critical fixes for direct contradictions, without new mechanisms or reopened decisions. Then freeze the architecture and prepare the submission. No subagents and no commit.
+- What the AI produced: corrections to ADR 0003, ADR 0004 and design.md; the freeze; trimmed detail; a 200-250 word AI note; export steps; a checklist.
+- What was wrong or shallow: the five fixes left two contradictions. "Creates the response if none exists" conflicted with a closed withdrawn invitation, and binding ignored a survey that starts with an AI turn. A tokenless code also had no regional host or collection to act on. The role table and audit list missed the new admin actions.
+- What I changed or decided: the freeze, and treating unverified items as documented risks.
+- Subagent used and what it found: none, by my decision. Claude Code checked this in its own context, which departs from the CLAUDE.md rule on self-review. The fixes have had no independent review.

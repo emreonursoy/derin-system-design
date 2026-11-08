@@ -1,89 +1,77 @@
 # ADR 0004: Dashboard as a static client app, a REST API, and one query layer
 
-**Status:** Proposed, for my review. **Inputs:** Q4, Q7, Q15, Q16, Q18, Q19, Q20, Q21, Q24, Q26, Q27, Q28, Q29, Q32, Q34, Q37, Q38. **Risks:** docs/risks.md.
+**Status:** Accepted, frozen for submission. Nothing is built or benchmarked. **Class:** Live charts, filters, saved sets, cross-tabs, transcripts, exports, roles and per-collection features are Required. The query layer and audit are Necessary. Disclosure values, retention and limits are Assumed. **Inputs:** Q4, Q7, Q15, Q16, Q18, Q19, Q20, Q21, Q26, Q28, Q29, Q32, Q37, Q38, Q43, Q44, Q46, Q50. **Risks:** docs/risks.md.
 
 Figures are ASSUMED or DERIVED, with arithmetic in docs/assumptions.md. Nothing is benchmarked. Chat and the summary are in ADR 0005.
 
 ## Rendering
+| Criterion | Static client app (chosen) | Server-rendered Next.js |
+| --- | --- | --- |
+| Health data in HTML | None | In every rendered page |
+| Parts to run | None added | One more service per region |
+| Auth | Browser sends the JWT to the regional API | Server must hold or forward the token |
+| First paint | Slower, then data loads | Faster |
+| Value of search indexing | None, behind login | None |
 
-| Criterion | Static client app (chosen) | Server-rendered Next.js | Server components with streaming |
-| --- | --- | --- | --- |
-| Health data in HTML | None | In every rendered page | In every rendered page |
-| Delivery | Front Door, same files for all | A Next.js server in every region, through the gateway | Same |
-| Parts to run | None added | One more service per region | One more service per region |
-| Auth | Browser sends the JWT to the regional API | Server must hold or forward the token | Same |
-| First paint | Slower, then data loads | Faster | Fastest |
-| Value of search indexing | None, behind login | None | None |
-
-**Decision:** a Next.js static export served from Front Door, with shadcn/ui and client-side data fetching. A health dashboard behind a login gains little from server rendering, and each server adds a place where data is decrypted and rendered. Researchers use desktops and decent networks, so the slower first paint is an acceptable cost.
+**Decision:** a Next.js static export served from Front Door, with shadcn/ui and client-side data fetching. Researchers use desktops and decent networks, so the slower first paint is an acceptable cost.
 
 | Point | Decision |
 | --- | --- |
-| Finding the region | After login, the app asks the control plane for the org's collections and their regions, then calls that region's API host. |
-| Token | The session stays at the control plane. The JWT is held in memory only, and renewed before its 5-minute expiry. |
-| Charts | Recharts through shadcn/ui charts (ASSUMED suitable). A chart is a client render of aggregates only. |
-| 80 questions | Virtualized list. A chart only loads when near the viewport, and requests are grouped into one query per view. |
-| Accessibility | Every chart has a table view. |
-| Analytics and errors | PostHog on UI events only, with no autocapture and no replay. Sentry on an allowlist that strips URLs and breadcrumbs, with no replay and no IP capture (Q17). Filter state never goes in dashboard URLs. |
-| Security headers | A strict content security policy, since a script injected here could read the token. |
+| Finding the region | After login, the app asks the control plane for the org's collections and their regions. |
+| Token | The session stays at the control plane. The JWT is held in memory, and renewed before its 5-minute expiry. |
+| Charts | Recharts through shadcn/ui charts (ASSUMED suitable). Aggregates only. Every chart has a table view. |
+| 80 questions | Virtualized list. A chart loads near the viewport, and requests are grouped into one query per view. |
+| Analytics and errors | PostHog on UI events only, with no autocapture or replay. Sentry on an allowlist. Filter state never goes in URLs. |
+| Security headers | A strict content security policy, since an injected script could read the token. |
 
 ## API style
-
 | Criterion | REST with OpenAPI (chosen) | GraphQL | tRPC |
 | --- | --- | --- | --- |
-| Limiting query cost | Each endpoint has one known cost | Clients shape queries, so cost needs extra analysis | Each endpoint has one known cost |
-| Fits the WAF and gateway paths | Clear paths and timeouts per route | One path for everything | Paths exist, but are tied to the client |
-| Streaming and long-poll | Plain HTTP | Needs a separate transport | Needs an adapter |
-| Typed client | Generated from OpenAPI | Generated | Built in |
-| Use by a Derin engine or others | Open | Open | TypeScript only |
+| Limiting query cost | Each endpoint has one known cost | Clients shape queries | Each endpoint has one known cost |
+| Streaming and long-poll | Plain HTTP | Separate transport | Needs an adapter |
+| Typed client | Generated | Generated | Built in |
+| Use by other services | Open | Open | TypeScript only |
 
-**Decision:** versioned REST on NestJS, with an OpenAPI contract and a generated TypeScript client. Read queries that carry filters use POST, so filter values stay out of URLs and logs. Polls and streams use GET, carrying IDs only. Every request goes through the same guard: token, role, feature, collection, rate limit.
+**Decision:** versioned REST on NestJS, with OpenAPI and a generated TypeScript client. Filters go in POST bodies, so their values stay out of URLs and logs. Every request goes through one guard: token, org against collection, role, feature, rate limit.
 
 | Endpoint | Purpose | Minimum role |
 | --- | --- | --- |
-| `GET /v1/collections/{id}/live?since={version}` | 5s poll. Unfiltered counts and charts from Redis. Empty if the version is unchanged. | Viewer |
-| `POST /v1/collections/{id}/views` | Charts for a filter. | Viewer |
-| `POST /v1/collections/{id}/crosstabs` | One cross-tab, with optional filter. | Viewer |
-| `GET, POST, PATCH, DELETE /v1/collections/{id}/filter-sets` | Saved filters. | Read: viewer. Write: analyst. |
-| `POST /v1/collections/{id}/transcripts/search` | Find redacted transcripts in a filter. | Analyst |
-| `GET /v1/collections/{id}/transcripts/{ref}` | One redacted transcript. | Analyst |
-| `POST /v1/collections/{id}/exports`, `GET .../exports/{id}` | Start and check an export. | Analyst; row-level admin |
-| `POST /v1/collections/{id}/chat/turns` and `GET .../{turn}`, `GET .../{turn}/stream` | Chat, with SSE and long-poll (ADR 0005). | Viewer |
-| `GET /v1/collections/{id}/summary` | Latest executive summary. | Viewer |
+| `GET /v1/collections/{id}/live?since={version}` | 5s poll, from Redis | Viewer |
+| `POST /v1/collections/{id}/views` | Charts for a filter | Viewer |
+| `POST /v1/collections/{id}/crosstabs` | One cross-tab | Viewer |
+| `GET, POST, PATCH, DELETE /v1/collections/{id}/filter-sets` | Saved filters | Read: viewer. Write: analyst |
+| `POST /v1/collections/{id}/transcripts/search`, `GET .../transcripts/{ref}` | Redacted transcripts | Analyst with grant |
+| `POST /v1/collections/{id}/exports`, `GET .../exports/{id}` | Start and check an export | Analyst. Row-level: admin. Transcript: admin with grant |
+| `POST /v1/collections/{id}/chat/turns`, `GET .../{turn}` | Chat: the POST responds with SSE, and GET fetches the saved answer (ADR 0005) | Viewer |
+| `GET /v1/collections/{id}/summary` | Latest summary | Viewer |
+| `POST /v1/collections/{id}/invites/{invite}/withdraw`, `.../revoke` | Act on a participant's request. Returns no response data. Audited | Admin |
 
 ## Roles and features
-Enforced in NestJS, in every path. The role comes from the token (Q28).
-
 | Action | Viewer | Analyst | Admin |
 | --- | --- | --- | --- |
-| Counts, charts, cross-tabs, saved filters, summary | Yes | Yes | Yes |
-| Chat over aggregates | Yes | Yes | Yes |
-| Create or edit saved filters | No | Yes | Yes |
-| Aggregate export | No | Yes | Yes |
-| Read redacted transcripts, chat with transcript quotes | No | Yes | Yes |
-| Row-level or transcript export | No | No | Yes, with live control plane check |
-| Manage members and features | No | No | Yes |
+| Counts, charts, cross-tabs, saved filters, summary, chat over aggregates | Yes | Yes | Yes |
+| Create or edit saved filters, aggregate export | No | Yes | Yes |
+| Read redacted transcripts, chat with quotes | No | With grant | With grant |
+| Row-level or transcript export | No | No | Yes, with the restrictions under Exports |
+| Manage members, withdraw or revoke an invitation | No | No | Yes |
 
-**Per-collection features:** a `collection_feature` table in the regional stack, holding switches such as chat, transcripts and early-access charts. The guard checks it, and the result is cached for 30s (ASSUMED). The client gets the list to hide controls, but the server is what enforces them.
-
-**Org check:** the guard compares the token's org with the collection's org on every request, because a role only means something within its org. Row-level security on `collection_id` is a second check. Reads of chat turns and exports also check the owner. One org owns each collection, and cross-org access is out of scope (Q38).
-
-**Transcript grant:** reading transcripts needs an analyst or admin role **and** a per-collection grant from an admin. It is not automatic with the role.
-
-**Account security:** MFA is required for admins and analysts, using Better Auth's two-factor plugin. Enforcing it per role is our own check (ASSUMED). Row-level and transcript exports also need a session under 15 minutes old (ASSUMED), using its documented session freshness.
-
-**Audit:** an append-only table in the regional Postgres, recording user, action, collection, validated filter, row count and time. It covers ad-hoc queries, chat tool calls, transcript reads, exports, and role and feature changes. Kept for 1 year (ASSUMED), with restricted access. The filter makes it sensitive, but it holds no answers.
+- **Per-collection features:** a `collection_feature` table holds switches such as chat, transcripts and early-access charts. The server enforces them, cached for 30s (ASSUMED). The client only hides controls.
+- **Who activates early access is a product assumption, not a decision (Q46).** The table supports either an org admin or Surgo staff. No role row or endpoint is designed for this until the owner is known.
+- **Org check:** the token's org must match the collection's org, on every request. Row-level security is a second check. One org owns each collection (Q38).
+- **Transcript grant:** needs an analyst or admin role **and** a per-collection grant from an admin.
+- **Account security:** MFA for admins and analysts, using Better Auth's two-factor plugin. Per-role enforcement is our own check (ASSUMED). Row-level and transcript exports need a recent session, 15 minutes (ASSUMED).
+- **Audit:** append-only, in the regional Postgres: user, action, collection, validated filter, row count and time. Covers ad-hoc queries, chat tool calls, transcript reads, exports, withdrawals, revocations, and grant and feature changes. Holds no answers, but filters make it sensitive.
 
 ## The query layer
-All aggregate reads pass through one NestJS module. Nothing else can read the read table.
+**This is the most important decision in the dashboard.** All dashboard and AI aggregate reads pass through one NestJS module. Only the projector, export, transcript and rebuild roles also have grants on the read table.
 
 1. Validate the filter against the collection's question definitions.
-2. Compile it to parameterized SQL. No text from the request ever enters SQL.
-3. Read the data version and run the query in one snapshot on a replica (ADR 0001).
-4. Apply suppression.
-5. Store in Redis, and audit.
+2. Compile it to parameterized SQL. No request text enters SQL.
+3. Read the data version and run the query in one snapshot on the replica (ADR 0001).
+4. Apply the disclosure policy.
+5. Cache in Redis, and audit.
 
-A filter is JSON. Clauses are ANDed, and values within a clause are ORed:
+Filter clauses are ANDed, and values within a clause are ORed:
 
 ```json
 { "all": [
@@ -93,153 +81,168 @@ A filter is JSON. Clauses are ANDed, and values within a clause are ORed:
 ], "state": "all" }
 ```
 
-### Suppression and comparison controls (Q7, Q21)
-The commitment is to **reduce** the risk of working out hidden values, not to prevent it entirely. Every number here applies to all roles and every aggregate output. All paths call one suppression function, including the projector's live rollups and the Redis-down read.
+## Disclosure
+**The requirement is architectural: one enforcement point, for every path.** Charts, cross-tabs, live rollups, the Redis-down path, chat tools and summaries all call one function. Transcripts and row-level exports are separate, gated paths (Q20).
 
-The privacy review showed a simple attack: chart `city in [nairobi, village]`, chart `city in [nairobi]`, and subtract, which reveals a village of 3. These controls are built to stop that attack.
+**One invitation contributes at most one participant (Q50).** Every count here is per invitation (ADR 0001). That doesn't verify real people, so "10" means 10 invitations.
 
-| Control | Rule |
-| --- | --- |
-| Minimum group | A segment under 10 responses shows "too few responses", with no count. |
-| Clause minimum | Each value in an ORed clause must reach 10 on its own. Age and numeric filters use fixed bands, each of which must reach 10. Otherwise the query shows "too few responses". |
-| Cell minimum | Any cell or bin under 10 shows as suppressed. |
-| Secondary suppression | If a cell in a row or column is suppressed, more are too, until the hidden total reaches 10. |
-| Complement | If total minus segment is under 10, the segment is suppressed. The same applies to "all" minus "completed". |
-| Rounding | **All filtered counts round to the nearest 5** (ASSUMED), at every segment size. Percentages use rounded counts. Means come from rounded bins, and round to a coarse step. |
-| Live comparison | Results are held by normalized filter, so equivalent filters share one held value. A segment under 100 only updates after 10 new responses, and unfiltered live charts do the same when responses are slow. These are exempt from the 10s target. |
-| Numeric extremes | Minimum and maximum are never shown. |
-| Identical answers | If everyone in a segment gave one answer, the chart shows a warning, and doesn't suppress. A finding like "all said yes" is valid. This remains a known exposure. |
-| Detection | Audit stores the validated filter. It flags pairs differing by one clause value. An alert goes to all admins and to Surgo, and doesn't block. |
+**The values are policy.** Surgo's disclosure policy isn't known, so everything below is **proposed, for review (Q44)**. They live in a versioned policy object, so changing a value needs no redesign, and the version is part of the cache key.
 
-These controls don't stop every overlap, or a determined person with outside knowledge. Rounding means cross-tabs may not sum exactly, and won't match row-level exports. The risk list says so.
+| Proposed control | Rule | Status |
+| --- | --- | --- |
+| Minimum group | A segment or cell under 10 invitations shows "too few responses" | Proposed baseline, for every role |
+| Complement | If total minus segment is under 10, the segment is suppressed. Same for "all" minus "completed" | Proposed baseline |
+| Secondary suppression | Hide more cells in a row or column until the hidden total reaches 10 | Proposed baseline |
+| Clause minimum | Each ORed value, and each fixed age or numeric band, must reach 10 alone | Proposed |
+| Rounding | Filtered counts round to the nearest 5. Percentages use rounded counts | Proposed |
+| Live hold | A segment under 100 only updates after 10 new responses. Held values clear when a response withdraws, and rebuild as in ADR 0001 | Proposed |
+| Numeric extremes | Minimum and maximum are never shown | Proposed |
+| Near-identical filter alert | Audit flags pairs differing by one clause value, and alerts without blocking | Proposed |
+
+**These reduce the risk of working out hidden values. They don't prevent it.** Rounding and suppression can't fully stop differencing: enough overlapping queries, averaging, or outside knowledge can still narrow down a value. If everyone in a segment gave one answer, that reveals it too. The chart warns, and doesn't suppress. T4 tests known attacks. Adding noise is the next step if tests recover values.
+
+**Costs:** rounding makes filtered numbers slightly inexact, so cross-tabs may not sum and won't match row-level exports. The clause minimum means rare values can't be filtered on.
+
+## Speed: four classes of work
+Everything here is a target or estimate, never a measurement.
+
+| Class | Examples | Path | Target |
+| --- | --- | --- | --- |
+| Unfiltered live views | Counts and charts | Redis | Under 1s p95, about 8s old |
+| Filtered queries | A filter, saved or ad-hoc | Replica scan, with cache | Under 3s p95 on a cache miss. An open view can be about 67s old, with "as of" and a refresh button (Q37) |
+| Cross-tabs | One table | Same scan path | Same as filtered. Multiple choice costs more, and is in T1 |
+| Slow or background | Exports, summary, redaction, a view with many charts | Background worker, or charts loading in stages | No interactive target. They show progress |
+
+Overload: a 10s statement timeout and concurrency limits, then a "busy" response.
 
 ## Charts by question type
-Unfiltered charts come from rollups. Filtered charts come from one scan of the read table, using the same shape.
+Unfiltered charts come from rollups. Filtered charts use one scan of the read table, in the same shape.
 
 | Type | Stored in rollups | Chart | Note |
 | --- | --- | --- | --- |
 | Single choice | Count per option | Bar | Percent of those who answered |
 | Multiple choice | Count per option, plus respondents | Bar | Percentages can exceed 100, and the chart says so |
-| Scale | Count per point, plus sum | Bar with mean | Mean hidden if the group is under 10 |
-| Numeric | Count per bin, plus count and sum | Histogram with mean and estimated median | Up to 20 bins (ASSUMED), set in the question definition. Median comes from bins, and is labelled as an estimate. |
-| All types | Each counter exists for "all" and "completed" | Toggle (Q19) | A completion adds that response's answers to the "completed" counters |
+| Scale | Count per point, plus sum | Bar with mean | Mean hidden if the group is under the minimum |
+| Numeric | Count per bin, plus count and sum | Histogram with mean and estimated median | Up to 20 bins (ASSUMED) |
+| All types | Counters for "all" and "completed" | Toggle (Q19) | One response per invitation, so completed counts at most one (ADR 0001) |
 
-A changed answer subtracts the old value and adds the new. Conversational answers aren't charted, since the brief lists only these four types. They appear as transcripts.
+Conversational answers aren't charted, since the brief lists only these four types. They appear as transcripts.
 
 ## Filters and saved sets
 | Point | Decision |
 | --- | --- |
 | Fields | Any closed question, plus the completed toggle. No free-text filters. |
-| Speed | Screener fields are indexed. Filters on other questions scan the collection's partition. |
-| Saved sets | Stored in the regional Postgres, with the collection: name, filter JSON, owner, version. The definition only, never a result. |
-| Sharing | Visible to everyone in the org that owns the collection (Q38). Editable by analysts and admins. |
-| Freshness | Saved and ad-hoc filters use the same path. An open filtered view refreshes every 30s (ASSUMED), with an "as of" time and a refresh button (Q37). Only unfiltered views stay within 10s. |
-| Saving before responses exist | Allowed. A saved filter is only a definition. The clause minimum applies when it runs, showing "too few responses" until each value reaches 10. |
-| Reuse | Saved sets belong to one collection, and are versioned with its question definitions, which are immutable once published (Q19). Copying to another collection re-validates. |
-| Privacy | A saved set passes through the same suppression, so sharing one reveals nothing new. Filter labels are written by staff, and should not name individuals. |
+| Speed | Screener fields are indexed. Others scan the collection's partition. |
+| Saved sets | Stored with the collection: name, filter JSON, owner, version. The definition only, never a result. Use the same path as ad-hoc filters. |
+| Sharing | Visible to the org that owns the collection. Editable by analysts and admins. |
+| Reuse | Versioned with the question definitions, which are immutable once published (Q19). |
 
 ## Cross-tabs
 | Point | Decision |
 | --- | --- |
-| Shape | One row question by one column question, with an optional filter. |
-| Limit | Up to 30 x 30 cells (ASSUMED). Numeric questions use their bins. |
-| Execution | Not pre-computed. One aggregate query in the same scan, cached like a view. Two questions per collection has 3,160 pairs (DERIVED), and most are never opened. |
-| Multiple choice | Each selected option counts once, so totals can exceed respondents, and the table says so. This costs more per row than single choice, and is in the benchmark. |
-| Suppression | All controls above. Row and column totals are suppressed if they would reveal a hidden cell. A hidden cell can still be estimated from one-way charts on the same filter, which rounding limits but doesn't remove. |
-| Output | Counts, and row or column percentages from those counts. Statistical tests aren't in scope. |
-| Export | Aggregate export of the table as shown, including suppression. |
+| Shape | One row question by one column question, with an optional filter. Up to 30 x 30 cells (ASSUMED). |
+| Execution | One aggregate query, cached like a view. Two questions per collection has 3,160 pairs (DERIVED), so pre-computing is out. |
+| Multiple choice | Totals can exceed respondents, and the table says so. |
+| Suppression | The same policy. A hidden cell can still be estimated from one-way charts on the same filter. Controls limit this, and don't remove it. |
+| Export | Aggregate export of the table as shown. |
 
 ## Transcripts and redaction
+**Redaction reduces identification risk. It doesn't guarantee anonymity.** It misses things, and a person can be identified by their story with no named entity. So transcripts stay a separate, audited permission.
+
 | Point | Decision |
 | --- | --- |
-| Service | Azure Language **Text PII**, on a regional resource. Microsoft lists Arabic, Swahili, Somali and Amharic for Text PII. Its Conversation PII lists only English, French, German and Spanish, so we don't use that. |
-| When | A Postgres-backed NestJS worker, like the projector, in batches, about 100 to 200 texts/s (DERIVED). Not one Inngest job per answer, which would give a vendor a per-participant timeline. Both sides of the conversation are redacted, since a reply can repeat a name. Unredacted text is never shown on the dashboard. |
-| Language gate | A language must pass a redaction test before its transcripts are browsable. A failing language stays hidden. |
-| Storage | Raw and redacted text are in separate tables, with separate database roles. Only interview generation (own response only) and the redaction worker read raw. No replica grant on raw tables. See "Retention". |
-| If redaction is missing | The transcript stays hidden. |
-| Browsing | Needs the transcript grant, and a filter matching 10 or more. **The floor applies after search terms too.** Exact match counts are hidden. Random order within a recent window, 20 per page (ASSUMED). At most 200 transcripts per user per day (ASSUMED). Each read is audited. |
-| Identity | A reference issued per result list, never reused across filters, so a person can't test which filters a transcript appears in. Opening a source quote uses a short-lived link. |
-| Display | Plain text only, since participants wrote it. |
-| Refusal flags | Self-harm refusal categories can't be filtered on, and aren't shown with the transcript. Access to them belongs to the client's safeguarding contact. |
-| Search | Postgres full-text on the redacted table, by language where a configuration exists, otherwise simple matching. Weak for some languages. |
-
-Redaction reduces risk, and misses things. Microsoft notes that detection varies by language and locale. A person can also be identified by their story without any named entity. So transcripts remain a separate audited permission.
+| Service | Azure Language Text PII, on a regional resource (ASSUMED). Accuracy, language coverage and processing location aren't verified. |
+| Language gate | A language must pass our redaction test before its transcripts are browsable. A failing language stays hidden. |
+| When | A background worker, in batches. Both sides of the conversation are redacted, since a reply can repeat a name. |
+| If redaction is missing | The transcript stays hidden. Unredacted text is never shown on the dashboard. |
+| Storage | Raw and redacted text in separate tables and database roles. No replica grant on raw tables. |
+| Browsing | Needs the grant, and a filter matching the minimum, **including after search terms**. Exact match counts are hidden. Random order, and page and daily limits (ASSUMED). Each read is audited. |
+| Identity | A reference issued per result list. This makes it harder to test which filters a transcript appears in, and identical quote text can still match. Opening a transcript reads the primary (ADR 0001). |
+| Display | Plain text only. |
+| Refusal flags | Self-harm categories can't be filtered on, and aren't shown with the transcript. |
+| Search | Postgres full-text on the redacted table. Weak for some languages. |
 
 ## Exports
-| Point | Aggregate export | Row-level export | Transcript export |
+| Point | Aggregate | Row-level | Transcript |
 | --- | --- | --- | --- |
-| Who | Analyst, admin | Admin only | Admin only |
-| Contents | Tables as shown, after suppression | Coded answers, with screeners in bands. **No raw numeric values or timestamps.** | Redacted text |
-| Filter | Any | Must match 10 or more, and each combination of screener bands must have 10 or more rows | Must match 10 or more |
-| Approval | No | A second admin approves. All admins are notified. | Same |
-| Live control plane check | No | Yes, and blocked if it's down (Q29) | Yes, and blocked if it's down |
-| IDs and order | None | A random ID per export, with rows shuffled | Same |
+| Who | Analyst, admin | **Admin can start it** | **Admin with the transcript grant can start it** |
+| Contents | Tables as shown, after suppression | Coded answers, with screeners in bands. No raw numeric values or timestamps | Redacted text, in languages that passed the redaction test only |
+| Filter (proposed) | Any | Matches the minimum, and each combination of screener bands has that many rows | Matches the minimum |
+| Live control plane check | No | Yes, blocked if down (Q29) | Yes, blocked if down |
+| Recent session and MFA | No | Yes | Yes |
+| Audit and notice to all admins | Audit | Both | Both |
+| IDs and order | None | Random ID per export, shuffled. No invite or response ID | Same |
 
-**Row-level export is outside the minimum of 10.** An admin can compute suppressed cells from the file. Two overlapping exports can also be matched on row content, so random IDs don't stop joining them. A second export overlapping an earlier one needs approval again, and the audit records it. We say this openly to clients.
+### Approval is an optional organizational policy (Q43)
+| Point | Position |
+| --- | --- |
+| Baseline | An admin can start a row-level or transcript export. No second person is needed. |
+| Optional policy | An org setting on the control plane (ASSUMED) can require a second admin's approval. The live check returns it. |
+| Single-admin org with the setting on | Exports wait until a second admin exists. |
+| Pending | **Any further or mandatory approval requirement is pending Surgo's policy.** |
+| Known limit | Without it, one stolen or misused admin account can export, relying on MFA, recent sign-in, the live check and audit (R2b). Notice to admins adds nothing in a one-admin org. With it, an admin could still create a second account. |
+
+**Row-level export sits outside the minimum group.** An admin can compute suppressed cells from the file, and match overlapping exports on row content. We say so openly to clients.
 
 **How it runs:**
 1. The API records the export and starts an Inngest job, carrying IDs only.
-2. A NestJS export worker reads from a replica and writes CSV to Blob Storage in chunks, so it can resume.
-3. At most 2 run at once per stack (ASSUMED). They use replica capacity that isn't in the 70-core sizing, which is on the risk list.
-4. The requester downloads through a **user delegation SAS** lasting 15 minutes (ASSUMED), directly from Blob Storage, over its public endpoint with anonymous access off. A browser can't reach a private endpoint. This also keeps large files off the unbuffered gateway (ADR 0002). The API issues the link only to the requester, checks role and control plane again at that moment, and audits each one. **A leaked link works from anywhere until it expires.**
-5. A lifecycle policy deletes the file after 24 hours (ASSUMED). Blob logs give download evidence (ASSUMED, not checked).
+2. The background worker reads from the replica by response ID ranges, so each response appears once, and writes CSV to Blob Storage in chunks. Chunks may reflect slightly different moments, and the file states its range. Withdrawal rules are in ADR 0001. Exports run one or two at a time (ASSUMED), so they can compete with queries while there's one replica.
+3. The requester downloads directly from Blob Storage through a **user delegation SAS** lasting 15 minutes (ASSUMED), so large files stay off the gateway. The API re-checks role and control plane first, and audits it. **A leaked link works from anywhere until it expires.**
+4. A lifecycle policy deletes the file after 24 hours (ASSUMED).
 
 | Point | Decision |
 | --- | --- |
-| Size | About 160 MB for coded answers at 500k x 80, and about 5 GB for transcripts (DERIVED from ASSUMED). |
-| Storage | Regional, zone-redundant, with no geo-replication. Public endpoint for SAS downloads, with anonymous access off. |
-| Spreadsheet safety | Cells starting with `=`, `+`, `-`, `@`, tab or carriage return are escaped, because participants wrote the text. |
-| Withdrawal | **A downloaded file can't be recalled** (Q18), and the export screen says so. A withdrawal deletes undownloaded files that contain that response. |
+| Spreadsheet safety | Cells starting with `=`, `+`, `-`, `@`, tab or carriage return are escaped. |
+| Withdrawal | **A downloaded file can't be recalled** (Q18), and the screen says so. Undownloaded files are deleted, and running exports recheck before publishing (ADR 0001). |
 
-## Retention
-All periods are ASSUMED. A retention period set per collection (Q18) can shorten them. A collection that never closes is treated as closed after 2 years.
+## Retention and withdrawal
+All periods are proposed and ASSUMED, and can be set per collection (Q18). The legal basis is out of scope.
 
 | Store | Kept until |
 | --- | --- |
-| Write table, read table, redacted transcripts | Collection's retention period |
+| Write table, read table, redacted transcripts | Collection's retention period. A collection that never closes is treated as closed after 2 years |
 | Raw transcripts, turn records | Collection close + 30 days |
 | Export files | 24 hours |
-| Chat history | 30 days, or a source's withdrawal, which removes that quote |
+| Chat history | 30 days, or a source's withdrawal, which replaces the affected turns (ADR 0005) |
 | Audit | 1 year |
 | Gateway, WAF and application logs | 30 days |
-| Backups | Age out with their retention window |
+| Backups | Their retention window |
+| Withdrawal tombstones and log | Until the last backup holding that response ages out. The log's container has its own lifecycle |
+| Unsynced data on phones | Deleted on acknowledgement, otherwise cleaned up when the app next runs (ADR 0003) |
+
+Withdrawal itself is in ADR 0001.
 
 ## Privacy and residency
 | Component | Impact |
 | --- | --- |
 | Front Door | Serves app files only. |
-| Browser | Holds aggregates in memory, and redacted text only for analysts and admins. Nothing is stored locally except UI preferences. |
+| Browser | Holds aggregates in memory, and redacted text only for permitted users. |
 | Query layer | The one path to aggregates, so one bug affects everything, which also means one place to test. |
-| Redis | Suppressed aggregates and held small-segment values. Filter hashes are keyed. |
-| Azure Language | Processes raw transcript text. Regional resource. Whether all processing stays in the region is ASSUMED, and on the risk list. |
-| Blob Storage | Files with row-level health data, in the region, for 24 hours, on a public endpoint. A SAS is a bearer link until it expires. |
-| PostHog, Sentry | No answers, filter values or chart data. Hosting regions unverified. |
-| Audit table | Pseudonymous user IDs and validated filters. In the region, with restricted access. |
+| Redis | Suppressed aggregates. Filter hashes are keyed. |
+| Redaction service | Processes raw transcript text. Location not verified (R10). |
+| Blob Storage | Row-level health data, in the region, for 24 hours (ASSUMED), on a public endpoint. **A downloaded file then sits outside any geography.** |
+| PostHog, Sentry | No answers, filter values or chart data. Hosting not verified. |
+| Audit table | Pseudonymous user IDs and validated filters, with restricted access. |
 
 ## Consequences and risks
-- The query layer is a single point of correctness. It needs the heaviest test coverage in the system, including tests that try to recover suppressed values.
-- Rounding makes all filtered numbers slightly inexact, and rare values can't be filtered on. Researchers must be told. This is the price of making the suppression hold.
-- A leaked SAS link works until it expires. Microsoft notes revoking one can be delayed.
-- Redaction depends on Azure Language capacity, which isn't checked. A backlog delays transcript browsing, not interviews.
-- An open filtered view, saved or ad-hoc, can show data up to about 67s old, while unfiltered views stay at about 8s (Q37).
-- A Redis failover blanks held small segments until 10 new responses arrive, which on a slow collection could take a long time. A missing key always counts as held, so a value never releases early.
-- The query limit of 5 per organization could leave one large client queuing. The number of organizations isn't assumed anywhere.
+- The query layer is a single point of correctness. It needs the heaviest tests, including attempts to recover hidden values.
+- Proposed controls may frustrate researchers (R21b).
+- A Redis failover blanks held small segments until new state builds (R21g).
 - The first paint is slower than a server-rendered page.
 
 ## Rejected
 | Alternative | Why rejected |
 | --- | --- |
-| Server-rendered dashboard | Adds a service per region, and puts health data in rendered HTML, for a login-only tool on decent networks. |
-| GraphQL | Clients could compose expensive filtered queries. Cost control and suppression are simpler per endpoint. |
-| tRPC | Good for a single TypeScript client, but ties the contract to it. |
-| Pre-computing cross-tabs | 3,160 pairs per collection, and filters multiply them further. |
-| Cubes by screener fields | Would speed common filters, but adds a store to keep correct, before the benchmark shows a need. First thing to try if scans miss the target. |
-| Sampling for fast estimates | Researchers expect real counts, and small samples worsen disclosure rules. |
-| Suppression in database views | Harder to test with secondary suppression and rounding. Row-level security still applies per collection as a second check (ASSUMED). |
-| Adding noise to counts | Stronger against comparison, but harder to explain to clients. Rounding plus the clause minimum handle the known attack. Noise is the next step if tests still recover values. |
-| Exact counts for segments of 100 or more | Lets anyone subtract two large segments to reveal a small one. |
-| Row-level export with no extra limits | Would make one admin's export the easiest way around every other control. |
-| Conversation PII | Lists only 4 languages. |
+| Server-rendered dashboard | Adds a service per region, and puts health data in rendered HTML, for a login-only tool. |
+| GraphQL | Clients could compose expensive queries. Per-endpoint cost control is simpler. |
+| tRPC | Ties the contract to one TypeScript client. |
+| Pre-computing cross-tabs | 3,160 pairs per collection, and filters multiply them. |
+| Cubes by screener fields | A store to keep correct, before any measurement shows a need. First thing to try if scans miss. |
+| Sampling | Researchers expect real counts, and small samples worsen disclosure. |
+| Suppression in database views | Harder to test with secondary suppression. |
+| Adding noise now | Harder to explain to clients. Next step if tests recover values. |
+| Hard-coding disclosure values | Surgo's policy isn't known. |
+| Mandatory second-admin approval | Blocks one-admin orgs, and is a business policy we can't invent (Q43). |
 | Exports through the API | Large files would hold unbuffered connections through the gateway. |
-| Blob Storage on a private endpoint only | A researcher's browser couldn't reach it, so every download would fail. |
-| Excel files | CSV is smaller to generate and stream. Excel can be added later. |
+| Blob Storage on a private endpoint only | A researcher's browser couldn't reach it. |
+| Excel files | CSV is simpler to generate and stream. |
