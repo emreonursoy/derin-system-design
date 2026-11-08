@@ -6,7 +6,7 @@ All figures come from docs/assumptions.md. Sizing inputs are ASSUMED, and nothin
 
 ## Context
 - A collection holds up to 500k responses x 80 questions.
-- Targets (ASSUMED): rollup reads under 1s p95, ad-hoc filters under 3s. Unfiltered views and pinned filter sets at most 10s old. Open ad-hoc filtered views about 67s old at worst (Q37).
+- Targets (ASSUMED): rollup reads under 1s p95, ad-hoc filters under 3s. Unfiltered views at most 10s old. Filtered views, saved or ad-hoc, about 67s old at worst (Q37).
 - Writes (DERIVED from ASSUMED pace): 500 answers/s average, 1,500/s burst.
 - Dashboard (DERIVED): 60 live polls/s, at most 10 ad-hoc queries/s.
 - Filters combine freely, so pre-computing every combination is impossible.
@@ -75,6 +75,23 @@ Use option B, in Postgres on Azure Database for PostgreSQL flexible server.
 
 Search uses Postgres full-text search, since pgvector is declined (Q15). Language coverage is a known weakness, including Arabic (ASSUMED, not tested).
 
+### Main tables
+These describe the decisions above. They add no new ones. Column names are ASSUMED where earlier sections don't fix them. Every table carries the collection ID, with row-level security. User IDs come from the token, with no foreign key across stacks.
+
+| Table | Key | Columns that matter |
+| --- | --- | --- |
+| `collection` | `id` | organization ID, status, retention, data version |
+| `survey_version` | collection ID, version | definition, immutable once published |
+| `respondent` | `response_id`: pseudonymous, time-ordered | collection ID, survey version, state. No names or contacts |
+| `identity.invite_map` | `invite_id`: random | response ID, expiry, revoked. Restricted schema with its own database role (ADR 0003) |
+| `answer_write` | collection ID, response ID, client answer ID | question ID, value, device sequence, transaction ID |
+| `response_read` | collection ID, response ID | indexed screeners, compact coded answers, completed |
+| `conversation_turn` | collection ID, response ID, turn ID | state, lease, attempts, text and reply. Redacted text is in a separate table |
+| `rollup` | collection ID, question ID, option or bin, state | count, sum |
+| `saved_filter` | `id` | collection ID, name, filter, version, owner |
+| `collection_feature` | collection ID, feature | enabled. Checked by the NestJS guard (ADR 0004) |
+| `audit_log` | `id` | collection ID, user ID, action, validated filter, row count, time |
+
 ### Projector
 A NestJS worker on the primary. Rejected: a per-answer Inngest event, which at 500/s would hand a vendor a per-participant timeline, and add load Inngest isn't sized for here.
 
@@ -93,11 +110,10 @@ A NestJS worker on the primary. Rejected: a per-answer Inngest event, which at 5
 | Part | Decision |
 | --- | --- |
 | Live rollups | After each batch, the projector writes suppressed rollups to Redis. Dashboards read only Redis, so polls never touch Postgres. |
-| Pinned filter sets | Up to 10 per collection (ASSUMED), pinned by analysts or admins. The projector keeps counters for each set, updating them in each batch exactly as it does unfiltered rollups, so a pinned set is a live rollup, not a repeated scan. A new pin runs one backfill scan, then catches up. If a screener answer changes a response's membership, the projector moves that response's counters. |
 | Live polling | Dashboards poll every 5s (Q32). An unchanged version returns an empty response, which saves little during active collection, when nearly every poll returns a body. |
 | Ad-hoc queries | On in-region replicas, in one repeatable-read transaction: read the data version, then run the query. Both come from the same snapshot, so a lagging replica can't store old data under a new version. |
 | Query cache | Azure Managed Redis in the regional stack. Key: collection, keyed hash of the filter, chart set, and a 30s bucket of the data version. Holds results only after suppression (Q27). Expires after 60s (ASSUMED). |
-| Refresh of open ad-hoc filtered views | Every 30s (ASSUMED), with a visible "as of" time showing the data's true age, and a rate-limited refresh button (Q37). |
+| Refresh of open filtered views, saved or ad-hoc | Every 30s (ASSUMED), with a visible "as of" time showing the data's true age, and a rate-limited refresh button (Q37). |
 | Limits | 10s statement timeout. 2 concurrent ad-hoc queries per user and 5 per organization (ASSUMED), counted in Redis. Beyond that, requests queue, then get a "busy" response. |
 | Suppression | One shared query layer applies the minimum of 10 and the Q21 controls to every aggregate, including chat and summaries (ADR 0004). Transcripts and row-level exports are separate, permission-gated paths (Q20). |
 
@@ -105,7 +121,7 @@ A NestJS worker on the primary. Rejected: a per-answer Inngest event, which at 5
 | Setting | Decision |
 | --- | --- |
 | `hot_standby_feedback` | On. Microsoft warns it can bloat the primary, but the 10s statement timeout limits how long cleanup is held back. We alert on bloat. |
-| Replica count | 3, at 32 vCores each (ASSUMED). 70 cores with no cache, including chat, / 32 per replica, rounded up, so a Redis outage doesn't overload them. Losing a replica during that outage would. |
+| Replica count | 3, at 32 vCores each (ASSUMED). 70 cores with no cache, including chat, / 32 per replica, rounded up, so a Redis outage doesn't overload them. Sizing counts no cache hits, so losing any replica overloads the rest (70 against 64, DERIVED) until it is replaced. Exports, search and reconciliation aren't in the 70. |
 | Lag | The UI shows "as of". An alert fires when a replica is over 4s behind, which is the budget for a cold ad-hoc query. |
 
 ### Freshness budget
@@ -113,10 +129,10 @@ From server commit, at normal operation. Inputs ASSUMED, results DERIVED. These 
 
 | View | Arithmetic | Age |
 | --- | --- | --- |
-| Live rollups and pinned sets | 2s batch + 1s run + 5s poll | About 8s, within 10s |
-| Cold ad-hoc query | 2s + 1s + 3s query = 6s, leaving 4s for replica lag | Within 10s if lag is under 4s. Microsoft says lag can reach minutes, so 4s is a target, not a promise. |
-| Cached ad-hoc result | 7s to reach the replica + up to 30s bucket | About 37s (Q37) |
-| Open ad-hoc view, just before refresh | 37s + 30s on screen | **About 67s**, accepted with an "as of" time and refresh button (Q37) |
+| Live unfiltered rollups | 2s batch + 1s run + 5s poll | About 8s, within 10s |
+| Cold filtered query | 2s + 1s + 3s query = 6s, leaving 4s for replica lag | About 10s if lag is under 4s. Microsoft says lag can reach minutes, so this isn't a promise. |
+| Cached filtered result | 7s to reach the replica + up to 30s bucket | About 37s (Q37) |
+| Open filtered view, just before refresh | 37s + 30s on screen | **About 67s**, accepted with an "as of" time and refresh button (Q37) |
 | Without Redis | 2s + 1s + lag + 5s read cycle + 5s poll | 13s plus lag, over the target |
 | Small segments | Update only after 10 new responses | Exempt (Q21) |
 
@@ -129,9 +145,9 @@ Escalate if any of these holds after tuning, on 3 replicas of 32 vCores (ASSUMED
 | --- | --- |
 | Query cost | Mean above 5 core-seconds. Replicas saturate here (96 / 17.5 queries/s, DERIVED), well before the 3s trigger. |
 | Ad-hoc filter or cross-tab | p95 at or above 3s |
-| Live rollup or pinned set age, excluding exempt small segments | Above 10s |
+| Live unfiltered rollup age, excluding exempt small segments | Above 10s |
 | Participant answer save, measured at the server | p95 above 500 ms (ASSUMED) |
-| **Open ad-hoc filtered view age (Q37)** | Clients need these within 10s, or often need more than the 10 pinned sets. Refreshing at 10s adds about 80 cores (DERIVED from ASSUMED), so this points straight to step 3 below. |
+| **Filtered view age (Q37)** | Clients need filtered views fresher than about 67s. Refreshing at 10s adds about 80 cores (DERIVED from ASSUMED), so this points straight to step 3 below. |
 
 Rollup reads come from Redis, so they aren't a Postgres trigger. Rollup age or save misses point to the primary or projector, where replicas can't help. Query misses escalate in this order, stopping at the first step that passes:
 1. Add replicas, up to the limit of five.
@@ -160,8 +176,7 @@ A participant starts this with their withdrawal code (ADR 0003).
 ## Consequences and risks
 - Microsoft warns that replica lag can grow under sustained heavy writes. This now affects ad-hoc queries only, since live rollups no longer use a replica.
 - Core demand is 70 with no cache (DERIVED from ASSUMED), which fits 3 replicas of 32 vCores only if the 1s cold scan holds. That scan is the most important number to benchmark. Query rates are averages with no burst.
-- Open ad-hoc filtered views can show data about 67s old (Q37). Pinned sets are the way to keep a filter within 10s.
-- Pinned sets add projector work: up to about 1.2 MB/s of extra counter writes at worst (DERIVED from ASSUMED), on top of about 1.9 MB/s of WAL. This is in test T8.
+- Open filtered views, saved or ad-hoc, can show data about 67s old (Q37).
 - The projector and watermark are new failure points, covered by reconciliation and alerts.
 - Multiple choice adds write rows beyond 40M. Not yet sized.
 
@@ -174,8 +189,8 @@ A participant starts this with their withdrawal code (ADR 0003).
 | Logical decoding | Handles ordering well, but a stalled slot holds WAL on the primary. Microsoft warns storage pressure can force the server read-only. |
 | Triggers on the write table | Puts read table work back into the participant's save. |
 | Pushing live updates over a stream | Needs fan-out across instances. Polling is simpler, and reads only Redis. |
-| Refreshing ad-hoc filtered views every 10s | 30 queries/s x 4 core-seconds = 120 cores (DERIVED from ASSUMED), about four replicas. |
-| Re-scanning pinned sets on a timer | A scan would miss 10s: 3s to the replica, plus lag, query and a 5s poll. Incremental counters avoid the scan. |
+| Refreshing filtered views every 10s | 30 queries/s x 4 core-seconds = 120 cores (DERIVED from ASSUMED), about four replicas. |
+| Live pinned filter sets | The projector would keep counters per saved filter, within 10s. Dropped by my decision: membership, backfill, withdrawal and reconciliation each became a new way to show wrong health figures. Saved filters use the normal filtered path. |
 | Query the narrow table directly | Filtering on several questions needs joins across up to 40M rows per collection, and misses the 3s target (ASSUMED). |
 | One column per question | Schema changes per collection, and many sparse columns. |
 | Materialized views | Full refreshes cannot meet the 10s target at this size (ASSUMED). |

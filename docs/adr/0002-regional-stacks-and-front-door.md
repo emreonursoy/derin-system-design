@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | Front Door | Global | Static files only. No API traffic, answers or tokens. |
 | Application Gateway, WAF_v2 SKU | One per region | All API traffic. The control plane gets its own listener on the Sweden Central gateway (ASSUMED). |
-| Control plane | Sweden Central (Q30) | Dashboard users, organizations, roles, and the collection-to-region map. Better Auth runs here. **No participant data.** Dashboard users' details may leave their region. |
+| Control plane | Sweden Central (Q30) | Dashboard users, organizations, members with roles, and the collection-to-region map, using Better Auth's `user`, `organization` and `member` tables plus our `collection_region`. Better Auth runs here. **No participant data.** Dashboard users' details may leave their region. |
 | Regional stack | One per region | NestJS, Postgres and replicas, Azure Managed Redis, Blob Storage for exports, Azure-hosted models, Azure Language for redaction, Inngest functions. All participant data. Next.js runs as static exports only (ADR 0003, 0004), so no Next.js server. |
 
 Stacks share no data, and no query crosses regions. The first stack is sized on Sweden Central as an example. The design treats the region as a variable, deployed from one template.
@@ -157,6 +157,18 @@ All timings below are ASSUMED, to be tuned in testing.
 - **Region-wide model outage:** AI questions stop in that region until it recovers. There is no failover outside the geography. This is the cost of Q2, and we state it openly.
 - **Process death and content filter refusals:** handled by the turn states in ADR 0003. Refusals are not outages, and are never retried.
 
+### What Redis holds
+No answers, transcripts, prompts or replies. Lifetimes are ASSUMED (assumptions.md).
+
+| Use | Lifetime |
+| --- | --- |
+| Rate limits and LLM budgets | 1 to 5 minutes |
+| Query concurrency counters | Seconds |
+| Query cache | 60s |
+| Live rollups and data version | Until the next batch |
+| Held small-segment values | Until released |
+| SSE and long-poll wake-ups | Not stored: a turn ID published once |
+
 ### If Redis is down
 Losing Redis loses no participant data.
 
@@ -173,7 +185,7 @@ Losing Redis loses no participant data.
 ### Internal access and logs
 | Point | Decision |
 | --- | --- |
-| Network | Postgres, Redis, Blob Storage and Azure Language on private endpoints inside the regional network, with NestJS as the only caller (ASSUMED available in each region). NestJS hosting is ASSUMED to be Azure Container Apps, as a private backend for the gateway. |
+| Network | Postgres, Redis and Azure Language on private endpoints inside the regional network, with NestJS as the only caller (ASSUMED available in each region). Blob Storage keeps a public endpoint with anonymous access off, because browsers download through a short-lived SAS (ADR 0004). NestJS and its export workers are its only writers. NestJS hosting is ASSUMED to be Azure Container Apps, as a private backend for the gateway. |
 | Database roles | Separate roles for interview, projector, query, redaction and export. No replica grant on raw text. |
 | Staff access | No standing access to participant data. One break-glass role, time-limited and logged. |
 | Gateway logs | Hold IP, time and path, which can link a person to a health survey. Paths carry opaque IDs. Kept 30 days (ASSUMED), in the region. |
@@ -188,7 +200,7 @@ Losing Redis loses no participant data.
 | WAF logs | Microsoft logs matched request data in clear by default. Enable log scrubbing, which needs OWASP CRS 3.2 or DRS 2.1. Microsoft still keeps IP addresses in internal logs. Logs stay in a regional workspace, with limited access. |
 | Control plane | Stored in Sweden Central, so **dashboard users' names and emails may leave their region**. No health data. |
 | Redis | In the regional stack, with no geo-replication. Suppressed aggregates, counters and opaque IDs only (Q34). Never answers, transcripts, prompts or replies. |
-| Blob Storage | Export files, in the regional stack, zone-redundant with no geo-replication (ADR 0004). |
+| Blob Storage | Export files, in the regional stack, zone-redundant with no geo-replication. Public endpoint, so a leaked 15-minute link works from anywhere until it expires (ADR 0004). |
 | Azure Language | Processes transcript text for redaction, in a regional resource (ADR 0004). |
 | JWT | Pseudonymous user ID, org and role only. Sent to the collection's region. |
 | Regional Postgres | Holds all participant data. Backup and replica copies stay in the geography. |
@@ -200,7 +212,7 @@ Losing Redis loses no participant data.
 ## Consequences and risks
 - **Gateway limits stay coarse.** The WAF can count per client IP. Phones on one carrier may share an IP (ASSUMED), so a low threshold could block real participants during a survey. Thresholds stay high, and NestJS with Redis carries the real limits.
 - **Edge protection is lost for APIs.** The regional public IP takes traffic directly. Microsoft says WAF doesn't stop volumetric network attacks, and recommends pairing it with DDoS Protection. This is on the risk list (Q36).
-- **WAF can block real answers.** Microsoft documents false positives on JSON and free text with SQL-like or HTML-like content, and participants write free text. Enable log scrubbing, tune rules on test data, then run in prevention. A blocked answer stays in the outbox, and we alert on it, so it isn't lost silently.
+- **WAF can block real answers.** Microsoft documents false positives on JSON and free text with SQL-like or HTML-like content, and participants write free text. Enable log scrubbing, tune rules on test data, then run in prevention. What the participant sees is in ADR 0003.
 - **More to run and pay for.** Each region adds a gateway, with a fixed cost plus capacity units. Cost and availability in South Africa North are not checked.
 - **Redis is a new dependency in every region.** If it fails, saves continue with no per-token limit, and queries lose their cache. Its data can be rebuilt, so persistence isn't needed. Regional capacity isn't guaranteed, and cost isn't checked.
 - **The AI will sometimes be unavailable.** Quota is per region, subscription and model, and data can't leave the geography, so there is no overflow elsewhere. Our tier, and whether a given model is good enough, are not known (Q35). Provisioned capacity in South Africa North is not priced.

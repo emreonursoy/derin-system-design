@@ -64,3 +64,24 @@ Add one entry per phase.
 - What was wrong or shallow: my pinned-sets requirement wasn't in the design at all. Re-scanning them on a timer wouldn't have met 10s, so the AI made them incremental, at about 1.2 MB/s of extra writes at worst (assumed). Layout was checked by script only, not visually.
 - What I changed or decided: Q37, Q38, the 10s scope. I exported the PNG three times. The AI's script check had passed, but the first render showed a real gap: it had guessed where Excalidraw places labels, so several overlapped boxes, arrows or the stack border. Each round fixed only real overlaps. Diagram called done after the final PNG check.
 - Subagent used and what it found: none. Reviewers ran before this change, so the diagram and pinned sets haven't had an independent review.
+
+## Phase 9: design.md
+- Prompt (paste or summarize): "Yes, write it", following the plan to write design.md after the diagram.
+- What the AI produced: 5-page notes from the ADRs, with figures tagged assumed or derived.
+- What was wrong or shallow: pinned sets were added as a feature without passing through the correctness work around rollups: membership, backfill, withdrawal and reconciliation were undefined. ADR 0002's private Blob endpoint contradicted ADR 0004's browser download. Some figures in assumptions.md went stale, including rounding. The diagram had passed a layout check but had no flows for summary, transcripts or audit.
+- What I changed or decided: I dropped live pinned sets, so saved filters use the normal filtered path and only unfiltered views stay within 10s. I chose which other findings to fix, and which go on the risk list.
+- Subagent used and what it found: design-reviewer, as above, and judged it not ready to submit. No further review ran after the fixes, by my decision.
+
+## Phase 10: Final diagram labels
+- Prompt (paste or summarize): five small label edits, including a home-region label for the control plane, showing the projector's writes to Postgres, and NestJS module on two boxes, only if they matched the ADRs. Make sure design.md explains why both apps are static and what that costs.
+- What the AI produced: the label edits, and a rendering table with a cost column.
+- What was wrong or shallow: design.md explained why static, but not its costs.
+- What I changed or decided: the wording of these labels.
+- Subagent used and what it found: none, by my decision.
+
+## Phase 11: Data panel
+- Prompt (paste or summarize): add a small panel next to the main diagram with the main tables for the control plane and regional Postgres, how they connect, how respondent identity stays separate, and Redis uses with assumed lifetimes, what never goes in it, and what happens if we lose it. Don't change the main flow or reopen decisions. Add a short summary to design.md section 4, within 5 pages.
+- What the AI produced: the panel, a main tables list in ADR 0001, Redis lifetimes in ADR 0002 and assumptions.md, and the summary.
+- What was wrong or shallow: most table and column names weren't in the ADRs, so they were added to ADR 0001 and marked assumed.
+- What I changed or decided: the panel's scope.
+- Subagent used and what it found: none.

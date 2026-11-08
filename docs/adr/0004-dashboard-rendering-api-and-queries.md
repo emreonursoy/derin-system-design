@@ -41,7 +41,7 @@ Figures are ASSUMED or DERIVED, with arithmetic in docs/assumptions.md. Nothing 
 
 | Endpoint | Purpose | Minimum role |
 | --- | --- | --- |
-| `GET /v1/collections/{id}/live?since={version}&set={pinned}` | 5s poll. Unfiltered or pinned-set counts and charts from Redis. Empty if the version is unchanged. | Viewer |
+| `GET /v1/collections/{id}/live?since={version}` | 5s poll. Unfiltered counts and charts from Redis. Empty if the version is unchanged. | Viewer |
 | `POST /v1/collections/{id}/views` | Charts for a filter. | Viewer |
 | `POST /v1/collections/{id}/crosstabs` | One cross-tab, with optional filter. | Viewer |
 | `GET, POST, PATCH, DELETE /v1/collections/{id}/filter-sets` | Saved filters. | Read: viewer. Write: analyst. |
@@ -101,7 +101,7 @@ The privacy review showed a simple attack: chart `city in [nairobi, village]`, c
 | Control | Rule |
 | --- | --- |
 | Minimum group | A segment under 10 responses shows "too few responses", with no count. |
-| Clause minimum | Each value in an ORed clause must reach 10 on its own. Age and numeric filters use fixed bands, each of which must reach 10. Otherwise the filter is refused. |
+| Clause minimum | Each value in an ORed clause must reach 10 on its own. Age and numeric filters use fixed bands, each of which must reach 10. Otherwise the query shows "too few responses". |
 | Cell minimum | Any cell or bin under 10 shows as suppressed. |
 | Secondary suppression | If a cell in a row or column is suppressed, more are too, until the hidden total reaches 10. |
 | Complement | If total minus segment is under 10, the segment is suppressed. The same applies to "all" minus "completed". |
@@ -133,8 +133,8 @@ A changed answer subtracts the old value and adds the new. Conversational answer
 | Speed | Screener fields are indexed. Filters on other questions scan the collection's partition. |
 | Saved sets | Stored in the regional Postgres, with the collection: name, filter JSON, owner, version. The definition only, never a result. |
 | Sharing | Visible to everyone in the org that owns the collection (Q38). Editable by analysts and admins. |
-| Pinned sets | Up to 10 per collection (ASSUMED). Analysts and admins pin a saved set, and it then stays within 10s as a live rollup (ADR 0001). All suppression controls apply. A set under 100 responses updates only after 10 new responses. |
-| Ad-hoc filters | A filter that isn't pinned refreshes every 30s while open, with an "as of" time and a refresh button (Q37). |
+| Freshness | Saved and ad-hoc filters use the same path. An open filtered view refreshes every 30s (ASSUMED), with an "as of" time and a refresh button (Q37). Only unfiltered views stay within 10s. |
+| Saving before responses exist | Allowed. A saved filter is only a definition. The clause minimum applies when it runs, showing "too few responses" until each value reaches 10. |
 | Reuse | Saved sets belong to one collection, and are versioned with its question definitions, which are immutable once published (Q19). Copying to another collection re-validates. |
 | Privacy | A saved set passes through the same suppression, so sharing one reveals nothing new. Filter labels are written by staff, and should not name individuals. |
 
@@ -180,14 +180,14 @@ Redaction reduces risk, and misses things. Microsoft notes that detection varies
 **How it runs:**
 1. The API records the export and starts an Inngest job, carrying IDs only.
 2. A NestJS export worker reads from a replica and writes CSV to Blob Storage in chunks, so it can resume.
-3. At most 2 run at once per stack (ASSUMED). They still use replica capacity, so they are in the sizing.
-4. The requester downloads through a **user delegation SAS** lasting 15 minutes (ASSUMED), directly from Blob Storage. This keeps large files off the unbuffered gateway (ADR 0002). Role and control plane are checked again when the SAS is issued, and each SAS is audited.
+3. At most 2 run at once per stack (ASSUMED). They use replica capacity that isn't in the 70-core sizing, which is on the risk list.
+4. The requester downloads through a **user delegation SAS** lasting 15 minutes (ASSUMED), directly from Blob Storage, over its public endpoint with anonymous access off. A browser can't reach a private endpoint. This also keeps large files off the unbuffered gateway (ADR 0002). The API issues the link only to the requester, checks role and control plane again at that moment, and audits each one. **A leaked link works from anywhere until it expires.**
 5. A lifecycle policy deletes the file after 24 hours (ASSUMED). Blob logs give download evidence (ASSUMED, not checked).
 
 | Point | Decision |
 | --- | --- |
 | Size | About 160 MB for coded answers at 500k x 80, and about 5 GB for transcripts (DERIVED from ASSUMED). |
-| Storage | Regional, zone-redundant, with no geo-replication. Public anonymous access off. |
+| Storage | Regional, zone-redundant, with no geo-replication. Public endpoint for SAS downloads, with anonymous access off. |
 | Spreadsheet safety | Cells starting with `=`, `+`, `-`, `@`, tab or carriage return are escaped, because participants wrote the text. |
 | Withdrawal | **A downloaded file can't be recalled** (Q18), and the export screen says so. A withdrawal deletes undownloaded files that contain that response. |
 
@@ -212,16 +212,17 @@ All periods are ASSUMED. A retention period set per collection (Q18) can shorten
 | Query layer | The one path to aggregates, so one bug affects everything, which also means one place to test. |
 | Redis | Suppressed aggregates and held small-segment values. Filter hashes are keyed. |
 | Azure Language | Processes raw transcript text. Regional resource. Whether all processing stays in the region is ASSUMED, and on the risk list. |
-| Blob Storage | Files with row-level health data, in the region, for 24 hours. A SAS is a bearer link until it expires. |
+| Blob Storage | Files with row-level health data, in the region, for 24 hours, on a public endpoint. A SAS is a bearer link until it expires. |
 | PostHog, Sentry | No answers, filter values or chart data. Hosting regions unverified. |
-| Audit table | Pseudonymous user IDs and filter hashes. In the region. |
+| Audit table | Pseudonymous user IDs and validated filters. In the region, with restricted access. |
 
 ## Consequences and risks
 - The query layer is a single point of correctness. It needs the heaviest test coverage in the system, including tests that try to recover suppressed values.
 - Rounding makes all filtered numbers slightly inexact, and rare values can't be filtered on. Researchers must be told. This is the price of making the suppression hold.
 - A leaked SAS link works until it expires. Microsoft notes revoking one can be delayed.
 - Redaction depends on Azure Language capacity, which isn't checked. A backlog delays transcript browsing, not interviews.
-- An open ad-hoc filtered view can show data up to about 67s old, while unfiltered views and pinned sets stay at about 8s (Q37).
+- An open filtered view, saved or ad-hoc, can show data up to about 67s old, while unfiltered views stay at about 8s (Q37).
+- A Redis failover blanks held small segments until 10 new responses arrive, which on a slow collection could take a long time. A missing key always counts as held, so a value never releases early.
 - The query limit of 5 per organization could leave one large client queuing. The number of organizations isn't assumed anywhere.
 - The first paint is slower than a server-rendered page.
 
@@ -240,4 +241,5 @@ All periods are ASSUMED. A retention period set per collection (Q18) can shorten
 | Row-level export with no extra limits | Would make one admin's export the easiest way around every other control. |
 | Conversation PII | Lists only 4 languages. |
 | Exports through the API | Large files would hold unbuffered connections through the gateway. |
+| Blob Storage on a private endpoint only | A researcher's browser couldn't reach it, so every download would fail. |
 | Excel files | CSV is smaller to generate and stream. Excel can be added later. |

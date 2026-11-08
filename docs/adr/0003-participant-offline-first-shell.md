@@ -81,6 +81,7 @@ A new device must not reveal earlier answers (Q25), and a forwarded link shouldn
 | **NestJS process dies, or a deploy kills it** | The lease expires, and the sweeper re-runs the turn. |
 | AI is slow, down or over quota | Follows ADR 0002, "When the AI is slow, down or over quota". |
 | Attempts are exhausted, or 5 minutes pass (ASSUMED) | The turn is marked unanswered and flagged in the data, and the survey moves to the next question. The participant's answer is kept. |
+| **WAF blocks a turn or answer (HTTP 403)** | The request never reaches NestJS, so no turn exists and no recovery rule applies. Retrying won't help, so the app doesn't. The participant sees "We couldn't send this. You can reword it, or skip this question." Skipping records the question as blocked, with no text, and the survey moves on. The text is deleted from the phone either way. The app reports a count with no content, so we can tune the rule. |
 | Same request sent twice, including a gateway retry | The same turn ID, scoped to the response from the token, returns the existing turn. It never creates a second message, and never returns someone else's turn. |
 
 Waiting long-polls and streams are woken through Redis with the turn ID only. The reply itself is read from Postgres, because no participant content goes in Redis (Q27, Q34). A reconnect that lands on another instance gets no tokens, only the finished reply. That is the normal outcome during a deploy.
@@ -173,7 +174,7 @@ While offline, an AI question shows "waiting for connection". It never shows can
 | Application Gateway | Decrypts and inspects answers and AI text inside the region. WAF logs need scrubbing (ADR 0002). |
 | Invite link | A bearer credential. Forwarding it gives access to the response. Mitigated by revocation, and by not showing earlier answers or pending replies on a new device (Q25). |
 | Fragment token | Stays in browser history on a shared phone. The shell removes it from the address bar after exchange. |
-| IndexedDB outbox | Unsynced health answers sit in clear on the phone. Encrypting them with a key on the same phone adds little, so I don't claim it. Deleted after acknowledgement, or at link expiry at the latest. The app has a "clear this device" action. WAF-blocked answers go to a retry path with an alert, and don't stay indefinitely. |
+| IndexedDB outbox | Unsynced health answers sit in clear on the phone. Encrypting them with a key on the same phone adds little, so I don't claim it. Deleted after acknowledgement, or at link expiry at the latest. The app has a "clear this device" action. WAF-blocked text is deleted once the participant rewords or skips. |
 | Service worker cache | Survey definition only. It could reveal the survey's topic to someone using a shared phone. |
 | Free text | Participants may type names or places. Pseudonymity doesn't cover this. Text is redacted in-region before any dashboard display (ADR 0004). |
 | Model calls | Within the geography (ADR 0002). |
@@ -185,7 +186,7 @@ While offline, an AI question shows "waiting for connection". It never shows can
 - **First load is the biggest bet.** On slow 3G, a failed first load means no offline ability at all.
 - **Reconnecting costs more.** Each new API connection pays the full path, 300 to 1,000 ms extra (DERIVED from ASSUMED, ADR 0002). Participants on bad networks reconnect most.
 - **Open streams hold server connections.** Up to 2,300 (DERIVED), and without response buffering a slow phone holds its NestJS connection longer. Deploys drop them, and the fallback covers this.
-- **WAF can block a real answer.** Free text can trigger a false positive. The answer stays in the outbox and we alert (ADR 0002). Retrying won't help, so the app must not loop.
+- **WAF can block a real answer.** Free text can trigger a false positive. The participant can reword or skip, so some answers are lost to rule tuning (risk R8).
 - **Token expiry while offline.** A short-lived token can expire with answers in the outbox. The shell keeps the invite token in memory or local storage to exchange again, which extends its time on the phone. A long gap may need the link reopened.
 - **Sync after long gaps.** Answers arrive late, so they don't count against the 10s target (Q26). Many phones returning at once could exceed the 3x burst, so clients use random backoff, and the server accepts small batches.
 - **Background sync may be limited.** Browser support is not verified. The outbox always also retries when the app is open, which works everywhere.

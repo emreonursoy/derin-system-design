@@ -93,7 +93,7 @@ Excludes read table indexes, full-text index, turn records, chat history, audit,
 Row sizes are rough estimates from field counts: they have no measurement behind them, and T1 and T8 replace them.
 
 ### Total data written (ADR 0001)
-The earlier 40 GB and 44 GB were row bytes written over a collection's life. They were not final storage, which is 0.5 GB and 6.5 GB. They also left out WAL, indexes and rewrites. This table replaces them, and uses WAL because every byte also reaches the replica.
+The earlier 40 GB and 44 GB were row bytes written over a collection's life. They were not final storage, which is about 0.83 GB and 8.7 GB. They also left out WAL, indexes and rewrites. This table replaces them, and uses WAL because every byte also reaches the replica.
 
 | Input | Value | Source |
 | --- | --- | --- |
@@ -147,11 +147,10 @@ Not included: full-page images after checkpoints, vacuum, heap page writes and r
 | Saturation point | 96 cores / 17.5 queries/s | 5.5 core-seconds per query DERIVED | Escalation trigger is set at 5 |
 | Shared cache hit rate | | not used in sizing | Unproven; a hit needs another user with the same filter in the same bucket |
 | Core demand if refreshed every 10s | 300 / 10s x 4 = 120, against 40 | 80 cores more DERIVED | Rejected alternative, Q37 |
-| Age of an open ad-hoc filtered view | 3s + 4s lag + 30s bucket + 30s on screen | about 67s DERIVED | Q37 |
-| Pinned sets per collection | | 10 ASSUMED | Enough for standing segments, and bounds projector work |
-| Pinned counters per large collection | 10 sets x 80 questions x 5 options (ASSUMED) x 2 states | 8,000 DERIVED | |
-| Pinned counter writes, worst case | 8,000 x 3 collections x 100 B / 2s | 1.2 MB/s DERIVED, at 100 B ASSUMED | Every counter touched in every batch; real load is lower |
-| Pinned set age | 2s + 1s + 5s poll | about 8s DERIVED | |
+| Age of an open filtered view | 3s + 4s lag + 30s bucket + 30s on screen | about 67s DERIVED | Q37 |
+| Replicas left after losing one | 64 cores against 70 | overloaded DERIVED | Sizing counts no cache hits |
+| Grouped Redis-down check | one query per instance / 2s, about 6 instances | about 3 reads/s DERIVED | |
+| Org query limit against demand | 17.5 queries/s x 1s | about 17 concurrent DERIVED | Against a limit of 5 per org; risk R21e |
 | Full view cost | 500k x 80 | 40M counter updates DERIVED | 4 core-seconds may not hold; benchmark 8 and 80 charts |
 | Projector batch interval | | 2s ASSUMED | Short enough for the 10s target |
 | Projector batch run time at burst | 1,500 x 2s = 3,000 rows | 1s ASSUMED | To be benchmarked |
@@ -179,7 +178,10 @@ All ASSUMED, with reasons, except where marked. Cost is not estimated (risk R19)
 | Statement timeout | 10s | Limits replica bloat, and bad queries |
 | Query limits | 2 per user, 5 per organization | Stops one user taking a replica's capacity |
 | Fill factor | 70 | Room for same-page updates |
-| Rounding | nearest 5, under 100 | Common disclosure practice; policy choice, no cited standard |
+| Rounding | nearest 5, all filtered counts | Stops subtracting large segments; policy choice, no cited standard |
+| Hold threshold | under 100 responses, until 10 new | Small enough that one response could stand out; policy choice |
+| Option A row with versions | 1 KB + 160 B = 1.16 KB DERIVED | At fill factor 70: 500k x 1.16 KB / 0.7 = about 830 MB DERIVED |
+| WAL just after a checkpoint, random IDs | 1,500 x 8 KB page = about 12 MB/s DERIVED | Upper bound, and why response IDs lead the key |
 | Numeric bins | up to 20 | Enough detail for a histogram |
 | Cross-tab limit | 30 x 30 | Readable, and bounds query cost |
 | Chat tool calls | 5 per question | Bounds cost and comparison attempts |
@@ -192,6 +194,10 @@ All ASSUMED, with reasons, except where marked. Cost is not estimated (risk R19)
 | Export file life | 24 hours | Limits time on disk |
 | Raw text | collection close + 30 days | Allows redaction reruns |
 | Chat history | 30 days | Short, to limit stored context |
+| Redis: rate limits, LLM budgets | 1 to 5 minutes | Matches the limit windows |
+| Redis: query concurrency | seconds | Only while a query runs |
+| Redis: live rollups, data version | until the next batch | Replaced every 2s when active |
+| Redis: held small segments | until released | A missing key counts as held |
 | Audit | 1 year | Time to investigate a complaint |
 | First-load JS | 150 KB | Slow 3G budget, from Q14 |
 | Retry attempts | 3 | Enough for a transient failure; the 5-minute cutoff still wins |
@@ -236,6 +242,7 @@ All ASSUMED, with reasons, except where marked. Cost is not estimated (risk R19)
 | Global service; the only location chosen is for resource group metadata | https://learn.microsoft.com/azure/frontdoor/front-door-faq | Excerpt |
 | Edge locations include Nairobi, Lagos, Cairo, Rabat, Cape Town and Isando | https://learn.microsoft.com/azure/frontdoor/edge-locations-by-region | Full |
 | Traffic goes to the closest edge and moves to the next closest if that is unhealthy (page covers the classic tier) | https://learn.microsoft.com/azure/frontdoor/front-door-traffic-acceleration | Excerpt |
+| Establishing a connection takes 3 to 5 round trips | same page | Excerpt |
 | Authenticated API routes should have caching disabled | https://learn.microsoft.com/azure/frontdoor/front-door-caching | Excerpt |
 | Non-regional edge caching services should not be used for sensitive content you want to keep in your geography | https://learn.microsoft.com/azure/azure-government/documentation-government-overview-wwps | Excerpt |
 
@@ -247,7 +254,7 @@ The earlier ASSUMED in-transit reading is no longer needed, because API traffic 
 | Global may process in any region. Data Zone covers US, EU or APAC. Standard/Regional processes in the deployment's region. | https://learn.microsoft.com/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure-region-availability | Full for the Standard/Regional and Regional Provisioned sections |
 | South Africa North Standard/Regional: text-embedding-3-large and text-embedding-ada-002 only | same page, Standard/Regional | Full |
 | South Africa North Regional Provisioned: gpt-4o (2024-05-13) and gpt-5.1 | same page, Regional Provisioned, Azure OpenAI table | Full |
-| Sweden Central Standard/Regional includes gpt-4.1 and gpt-5.1 | same page, Standard/Regional | Full |
+| Sweden Central Standard/Regional includes gpt-4.1, gpt-4.1-mini and gpt-5.1 | same page, Standard/Regional | Full |
 | Processing stays in the geography but may move between its regions. Batch is a Global type. Abuse-monitoring data is stored in the geography, with possible human review. Responses API stores message history. | https://learn.microsoft.com/azure/foundry/responsible-ai/openai/data-privacy | Full |
 | Modified abuse monitoring needs an application and approval | https://learn.microsoft.com/azure/foundry/openai/concepts/abuse-monitoring | Excerpt |
 
