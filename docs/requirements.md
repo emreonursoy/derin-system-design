@@ -15,12 +15,12 @@
 | C4 | Auth, both apps (roles admin/analyst/viewer, per-collection features) | design.md section 5 | todo |
 | C5 | Dashboard fast and fresh at 500k x 80, 300 users | design.md section 6 | todo |
 | C6 | Participant app reliable on bad networks (RTL, multi-language, conversational AI) | design.md section 7 | todo |
-| C7 | 2-3 biggest trade-offs and what was rejected | docs/adr/0001-0003 + design.md section 8 | todo |
-| F1 | Live counts, charts per question type | | todo |
-| F2 | Filters, segments, saved filter sets | | todo |
-| F3 | Cross-tabs | | todo |
-| F4 | AI executive summary | | todo |
-| F5 | Chat with your data, streaming | | todo |
-| F6 | Transcript browsing, exports | | todo |
-| F7 | Sensitive health data | | todo |
+| C7 | 2-3 biggest trade-offs and what was rejected | docs/adr/0001-0003 + design.md section 8 | ADRs drafted, in my review; design.md todo |
+| F1 | Live counts, charts per question type | ADR 0001, ADR 0004 | ADR drafted, in my review |
+| F2 | Filters, segments, saved filter sets | ADR 0004 | ADR drafted, in my review |
+| F3 | Cross-tabs | ADR 0004 | ADR drafted, in my review |
+| F4 | AI executive summary | ADR 0005 | ADR drafted, in my review |
+| F5 | Chat with your data, streaming | ADR 0005, ADR 0003 | ADR drafted, in my review |
+| F6 | Transcript browsing, exports | ADR 0004 | ADR drafted, in my review |
+| F7 | Sensitive health data | All ADRs, docs/risks.md | ADRs drafted, in my review |
 | I1 | Be ready to change the diagram live | diagram/README.md | todo |

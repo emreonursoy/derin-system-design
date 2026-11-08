@@ -39,4 +39,4 @@ Surgo's Derin platform runs AI-led interviews with thousands of participants. Yo
 - the 2-3 biggest trade-offs and what you rejected
 
 ## My own stack and choices (not from the brief)
-TypeScript, Postgres, NestJS, React, Next.js, shadcn/ui, Inngest (background jobs, AI workflows), PostHog (analytics), Sentry (errors), Azure, a CDN, an API gateway with authentication (Better Auth), rate limiting and routing. Data residency by region. Participant concurrency target: at least 10k at once. Design only, nothing is built.
+TypeScript, Postgres, Redis, NestJS, React, Next.js, shadcn/ui, Inngest (background jobs, AI workflows), PostHog (analytics), Sentry (errors), Azure, Front Door as the CDN for static files only, a regional Application Gateway with WAF for all API traffic, Better Auth for authentication. NestJS handles auth checks and per-token rate limits. Data residency by region. Participant concurrency target: at least 10k at once. Design only, nothing is built.

@@ -16,7 +16,7 @@ Produce a system design, not code. Deliverables are tracked in docs/requirements
 - Disagree with me when warranted: give the reason and an alternative, then wait for my decision.
 - Decisions go in docs/adr/NNNN-title.md before they appear in design.md or the diagram.
 - Ask instead of guessing when an answer changes the architecture; record it in docs/open-questions.md.
-- The stack is fixed unless I approve a change: TypeScript, Postgres, NestJS, React, Next.js, shadcn/ui, Inngest, PostHog, Sentry, Better Auth, Azure, CDN, gateway with auth + rate limiting + routing.
+- The stack is fixed unless I approve a change: TypeScript, Postgres, Redis, NestJS, React, Next.js, shadcn/ui, Inngest, PostHog, Sentry, Better Auth, Azure, Front Door as the CDN for static files only, and a regional Application Gateway with WAF for all API traffic. NestJS handles auth checks and per-token rate limits (ADR 0002).
 - For anything about Better Auth capabilities, use the Better Auth MCP. Do not invent plugin or API names.
 - Check Azure limits and regional availability with the Microsoft Learn MCP, and cite the page in docs/assumptions.md.
 - The .excalidraw file is the diagram's source of truth. After every change, tell me to open it in Excalidraw and export diagram/architecture.png. Then read that PNG and list overlaps and unclear parts before saying it is done.
