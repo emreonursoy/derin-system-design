@@ -19,7 +19,7 @@ Produce a system design, not code. Deliverables are tracked in docs/requirements
 - The stack is fixed unless I approve a change: TypeScript, Postgres, NestJS, React, Next.js, shadcn/ui, Inngest, PostHog, Sentry, Better Auth, Azure, CDN, gateway with auth + rate limiting + routing.
 - For anything about Better Auth capabilities, use the Better Auth MCP. Do not invent plugin or API names.
 - Check Azure limits and regional availability with the Microsoft Learn MCP, and cite the page in docs/assumptions.md.
-- The .excalidraw file is the diagram's source of truth. After every change, export a PNG and LOOK at it; list overlaps and unclear parts before saying it is done.
+- The .excalidraw file is the diagram's source of truth. After every change, tell me to open it in Excalidraw and export diagram/architecture.png. Then read that PNG and list overlaps and unclear parts before saying it is done.
 - Use the subagents in .claude/agents/ for review. Never review your own draft in the same context.
 
 ## Style
