@@ -315,6 +315,14 @@ Not checked: Application Gateway availability in South Africa North, WAF_v2 comp
 
 ASSUMED: Text PII is available in Sweden Central and South Africa North, and processes within the region. Recharts suits shadcn/ui charts. `EventSource` can't set headers. Azure prompt attack detection suits chat. Not checked: Azure Language quota, or Blob log detail for proving downloads.
 
+### Container Apps (NestJS hosting)
+| Fact | Page | Read |
+| --- | --- | --- |
+| HTTP ingress supports HTTP/1.1 and HTTP/2, with a 240s request timeout | https://learn.microsoft.com/azure/container-apps/ingress-overview | Excerpt |
+| Idle request timeout defaults to 4 minutes on premium ingress, configurable to 30 | https://learn.microsoft.com/azure/container-apps/ingress-environment-configuration | Excerpt |
+
+ASSUMED: availability in Sweden Central and South Africa North. Not checked: SSE through its ingress specifically, which is part of test T3.
+
 ### Redis
 | Fact | Page | Read |
 | --- | --- | --- |

@@ -34,7 +34,7 @@ Both apps are Next.js static exports, served from Front Door, which handles **st
 | Part | Decision | Privacy and residency |
 | --- | --- | --- |
 | Entry | Regional Application Gateway with WAF, for all API traffic | Data is decrypted and inspected inside the region. WAF logs are scrubbed |
-| API | NestJS, versioned REST, OpenAPI, generated TypeScript client | Filters go in POST bodies, so they stay out of URLs and logs |
+| API | NestJS and its workers on Azure Container Apps, versioned REST, OpenAPI, generated TypeScript client | Filters go in POST bodies, so they stay out of URLs and logs |
 | Guard | Token, org against collection, role, feature, rate limit, on every request | One place to enforce and test |
 | Limits | Counters in regional Redis, so they stay accurate as instances scale | Opaque IDs and counts only |
 | Streaming | SSE for AI turns and chat, with a long-poll fallback | Tokens in headers, never URLs |
@@ -68,8 +68,9 @@ Each collection pins to one region, in one stack per region. Stacks share no par
 | Edit saved filters, aggregate export | No | Yes | Yes |
 | Read redacted transcripts | No | With a per-collection grant | With a per-collection grant |
 | Row-level or transcript export | No | No | Yes, with a second admin's approval |
+| Manage members and features | No | No | Yes |
 
-- **Features:** per-collection switches live in a regional table, and the server enforces them.
+- **Features:** per-collection switches, such as early access, live in a regional table. Admins turn them on, and the server enforces them.
 - **Org:** one org owns each collection. Cross-org access is out of scope.
 - **Stale access:** a removed user keeps access for up to 5 minutes, and we say so. Row-level export also checks the control plane live, and is blocked if it's down.
 - **Account security:** MFA for admins and analysts. Per-role enforcement is assumed.
@@ -133,7 +134,7 @@ This **reduces** the risk of recovering hidden values, and doesn't prevent it. F
 ## 9. Security, privacy, residency
 | Boundary | Position |
 | --- | --- |
-| Residency | Pinned to a region, with no in-country promise. Azure lists no Kenya region, so a Kenyan collection leaves the country |
+| Residency | Pinned to a region, with no in-country promise. Azure lists no Kenya region, so a Kenyan collection leaves the country. **Phones and downloaded exports sit outside the geography:** unsynced answers stay on the phone, and a downloaded file goes wherever its user is |
 | Models | Azure-hosted, regional or provisioned only. Microsoft commits to the geography, not the single region. No suitable model means no AI questions there. South Africa North has chat on Provisioned only |
 | Abuse monitoring | Flagged prompts may be stored in the geography for human review. Modified monitoring is assumed, and the notice covers it otherwise |
 | Third parties | Inngest gets IDs only. PostHog is dashboard only. Sentry strips URLs, breadcrumbs and IP addresses. Hosting regions are unverified |

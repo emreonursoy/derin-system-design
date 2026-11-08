@@ -185,7 +185,7 @@ Losing Redis loses no participant data.
 ### Internal access and logs
 | Point | Decision |
 | --- | --- |
-| Network | Postgres, Redis and Azure Language on private endpoints inside the regional network, with NestJS as the only caller (ASSUMED available in each region). Blob Storage keeps a public endpoint with anonymous access off, because browsers download through a short-lived SAS (ADR 0004). NestJS and its export workers are its only writers. NestJS hosting is ASSUMED to be Azure Container Apps, as a private backend for the gateway. |
+| Network | Postgres, Redis and Azure Language on private endpoints inside the regional network, with NestJS as the only caller (ASSUMED available in each region). Blob Storage keeps a public endpoint with anonymous access off, because browsers download through a short-lived SAS (ADR 0004). NestJS and its export workers are its only writers. NestJS and its workers run on Azure Container Apps, as a private backend for the gateway. Its 240s ingress request timeout and 4-minute idle default sit above our 90s stream limit. Availability in each region is ASSUMED. |
 | Database roles | Separate roles for interview, projector, query, redaction and export. No replica grant on raw text. |
 | Staff access | No standing access to participant data. One break-glass role, time-limited and logged. |
 | Gateway logs | Hold IP, time and path, which can link a person to a health survey. Paths carry opaque IDs. Kept 30 days (ASSUMED), in the region. |
