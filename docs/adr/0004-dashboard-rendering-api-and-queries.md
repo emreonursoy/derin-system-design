@@ -1,6 +1,6 @@
 # ADR 0004: Dashboard as a static client app, a REST API, and one query layer
 
-**Status:** Proposed, for my review. **Inputs:** Q4, Q7, Q15, Q16, Q18, Q19, Q20, Q21, Q24, Q26, Q27, Q28, Q29, Q32, Q34. **Open:** Q37. **Risks:** docs/risks.md.
+**Status:** Proposed, for my review. **Inputs:** Q4, Q7, Q15, Q16, Q18, Q19, Q20, Q21, Q24, Q26, Q27, Q28, Q29, Q32, Q34, Q37, Q38. **Risks:** docs/risks.md.
 
 Figures are ASSUMED or DERIVED, with arithmetic in docs/assumptions.md. Nothing is benchmarked. Chat and the summary are in ADR 0005.
 
@@ -41,7 +41,7 @@ Figures are ASSUMED or DERIVED, with arithmetic in docs/assumptions.md. Nothing 
 
 | Endpoint | Purpose | Minimum role |
 | --- | --- | --- |
-| `GET /v1/collections/{id}/live?since={version}` | 5s poll. Unfiltered counts and charts from Redis. Empty if the version is unchanged. | Viewer |
+| `GET /v1/collections/{id}/live?since={version}&set={pinned}` | 5s poll. Unfiltered or pinned-set counts and charts from Redis. Empty if the version is unchanged. | Viewer |
 | `POST /v1/collections/{id}/views` | Charts for a filter. | Viewer |
 | `POST /v1/collections/{id}/crosstabs` | One cross-tab, with optional filter. | Viewer |
 | `GET, POST, PATCH, DELETE /v1/collections/{id}/filter-sets` | Saved filters. | Read: viewer. Write: analyst. |
@@ -66,7 +66,7 @@ Enforced in NestJS, in every path. The role comes from the token (Q28).
 
 **Per-collection features:** a `collection_feature` table in the regional stack, holding switches such as chat, transcripts and early-access charts. The guard checks it, and the result is cached for 30s (ASSUMED). The client gets the list to hide controls, but the server is what enforces them.
 
-**Org check:** the guard compares the token's org with the collection's org on every request, because a role only means something within its org. Row-level security on `collection_id` is a second check (ASSUMED). Reads of chat turns and exports also check the owner. Whether users outside the owning org need access is Q38.
+**Org check:** the guard compares the token's org with the collection's org on every request, because a role only means something within its org. Row-level security on `collection_id` is a second check. Reads of chat turns and exports also check the owner. One org owns each collection, and cross-org access is out of scope (Q38).
 
 **Transcript grant:** reading transcripts needs an analyst or admin role **and** a per-collection grant from an admin. It is not automatic with the role.
 
@@ -132,7 +132,9 @@ A changed answer subtracts the old value and adds the new. Conversational answer
 | Fields | Any closed question, plus the completed toggle. No free-text filters. |
 | Speed | Screener fields are indexed. Filters on other questions scan the collection's partition. |
 | Saved sets | Stored in the regional Postgres, with the collection: name, filter JSON, owner, version. The definition only, never a result. |
-| Sharing | Visible to everyone in the org with access to the collection. Editable by analysts and admins. |
+| Sharing | Visible to everyone in the org that owns the collection (Q38). Editable by analysts and admins. |
+| Pinned sets | Up to 10 per collection (ASSUMED). Analysts and admins pin a saved set, and it then stays within 10s as a live rollup (ADR 0001). All suppression controls apply. A set under 100 responses updates only after 10 new responses. |
+| Ad-hoc filters | A filter that isn't pinned refreshes every 30s while open, with an "as of" time and a refresh button (Q37). |
 | Reuse | Saved sets belong to one collection, and are versioned with its question definitions, which are immutable once published (Q19). Copying to another collection re-validates. |
 | Privacy | A saved set passes through the same suppression, so sharing one reveals nothing new. Filter labels are written by staff, and should not name individuals. |
 
@@ -219,7 +221,7 @@ All periods are ASSUMED. A retention period set per collection (Q18) can shorten
 - Rounding makes all filtered numbers slightly inexact, and rare values can't be filtered on. Researchers must be told. This is the price of making the suppression hold.
 - A leaked SAS link works until it expires. Microsoft notes revoking one can be delayed.
 - Redaction depends on Azure Language capacity, which isn't checked. A backlog delays transcript browsing, not interviews.
-- An open filtered view can show data up to about 67s old (Q37).
+- An open ad-hoc filtered view can show data up to about 67s old, while unfiltered views and pinned sets stay at about 8s (Q37).
 - The query limit of 5 per organization could leave one large client queuing. The number of organizations isn't assumed anywhere.
 - The first paint is slower than a server-rendered page.
 

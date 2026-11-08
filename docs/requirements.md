@@ -2,10 +2,10 @@
 
 | # | Requirement | Where covered | Status |
 | --- | --- | --- | --- |
-| D1 | Architecture diagram: components | diagram/architecture.excalidraw | todo |
-| D2 | Diagram: data flows and request flows | diagram | todo |
-| D3 | Diagram: technology choices | diagram | todo |
-| D4 | Editable source + image sent | diagram/ | todo |
+| D1 | Architecture diagram: components | diagram/architecture.excalidraw | done, PNG checked |
+| D2 | Diagram: data flows and request flows | diagram | done, PNG checked |
+| D3 | Diagram: technology choices | diagram | done, PNG checked |
+| D4 | Editable source + image sent | diagram/ | both files ready, not yet sent |
 | D5 | Notes, max 5 pages (optional) | docs/design.md | todo |
 | D6 | AI workflow note a-d | submission/ai-workflow-note.md | todo |
 | D7 | Session export attached | submission/transcript/ | todo |

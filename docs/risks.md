@@ -33,7 +33,7 @@ Standing rule from me: anything that can't be verified is marked ASSUMED or list
 | R10 | **Regional processing is not fully verified** for Azure Language. | Text may be processed outside the assumed boundary | Regional resource. Confirm in Microsoft's data terms. | ASSUMED |
 | R11 | **Vendor data handling is unverified:** Inngest, PostHog and Sentry hosting regions, and Inngest's step storage. | Metadata in another region | IDs only in Inngest. No content in the others. | ASSUMED |
 | R12 | **Dashboard capacity is unproven.** 70 cores with no cache rests on an assumed 1s scan, with no burst. An 80-chart view may cost far more. NestJS sizing excludes streams and model calls. | Slow dashboards and interviews | T1, T8. Escalation path in ADR 0001. | Open |
-| R13 | **Open filtered views can show data about 67s old** (Q37). | Over the 10s target | Visible "as of", refresh button. | Open question |
+| R13 | **Open ad-hoc filtered views can show data about 67s old** (Q37). | A researcher may read older figures | Visible "as of", refresh button. Pinned sets stay within 10s. A columnar store is the trigger if clients need more (ADR 0001). | Accepted |
 | R14 | **A single control plane.** A Sweden Central outage stops dashboards everywhere within 5 minutes. | Researchers lose access, interviews continue | Zone redundancy within the region (ASSUMED). | Accepted |
 | R15 | **Dashboard users' details may leave their region** (Q30). | Contractual concern for some clients | Stated openly. | Accepted |
 | R16 | **Stale access for up to 5 minutes** after removal, except for row-level export. | A removed user keeps read access briefly | Stated openly (Q29). | Accepted |

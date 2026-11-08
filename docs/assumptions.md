@@ -147,7 +147,11 @@ Not included: full-page images after checkpoints, vacuum, heap page writes and r
 | Saturation point | 96 cores / 17.5 queries/s | 5.5 core-seconds per query DERIVED | Escalation trigger is set at 5 |
 | Shared cache hit rate | | not used in sizing | Unproven; a hit needs another user with the same filter in the same bucket |
 | Core demand if refreshed every 10s | 300 / 10s x 4 = 120, against 40 | 80 cores more DERIVED | Rejected alternative, Q37 |
-| Age of an open filtered view | 3s + 4s lag + 30s bucket + 30s on screen | about 67s DERIVED | Q37 |
+| Age of an open ad-hoc filtered view | 3s + 4s lag + 30s bucket + 30s on screen | about 67s DERIVED | Q37 |
+| Pinned sets per collection | | 10 ASSUMED | Enough for standing segments, and bounds projector work |
+| Pinned counters per large collection | 10 sets x 80 questions x 5 options (ASSUMED) x 2 states | 8,000 DERIVED | |
+| Pinned counter writes, worst case | 8,000 x 3 collections x 100 B / 2s | 1.2 MB/s DERIVED, at 100 B ASSUMED | Every counter touched in every batch; real load is lower |
+| Pinned set age | 2s + 1s + 5s poll | about 8s DERIVED | |
 | Full view cost | 500k x 80 | 40M counter updates DERIVED | 4 core-seconds may not hold; benchmark 8 and 80 charts |
 | Projector batch interval | | 2s ASSUMED | Short enough for the 10s target |
 | Projector batch run time at burst | 1,500 x 2s = 3,000 rows | 1s ASSUMED | To be benchmarked |
